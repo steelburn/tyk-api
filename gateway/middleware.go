@@ -311,12 +311,39 @@ func (t BaseMiddleware) ApplyPolicies(session *user.SessionState) error {
 	}
 
 	didQuota, didRateLimit, didACL, didComplexity := make(map[string]bool), make(map[string]bool), make(map[string]bool), make(map[string]bool)
-	policies := session.PolicyIDs()
+	policyIDs := session.PolicyIDs()
+	customPolicies := false 
+	
+	if polJSON, found := session.Metadata["policies"]; found {
+		policies := []user.Policy{}
+		err := json.Unmarshal(policies, polJSON)
+		if err != nil {
+			log.Error("Failed unmarshal policies", err)
+		} else {
+			cusomPolicies = true
+			policyIDs = []string{}
+			for _, pol := range policies {
+				policyIDs = append(policyIDs, pol.ID)
+			}
+		}
+	}
 
-	for _, polID := range policies {
-		t.Gw.policiesMu.RLock()
-		policy, ok := t.Gw.policiesByID[polID]
-		t.Gw.policiesMu.RUnlock()
+	for _, polID := range policyIDs {
+		var policy user.Policy
+		
+		if customPolicies {
+			for _, pol := range policies {
+				if pol.ID == polID {
+					policy = pol
+					break
+				}
+			}
+		} else 
+			t.Gw.policiesMu.RLock()
+			policy, ok := t.Gw.policiesByID[polID]
+			t.Gw.policiesMu.RUnlock()
+		}
+		
 		if !ok {
 			err := fmt.Errorf("policy not found: %q", polID)
 			t.Logger().Error(err)
