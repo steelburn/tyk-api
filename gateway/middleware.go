@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -312,43 +313,42 @@ func (t BaseMiddleware) ApplyPolicies(session *user.SessionState) error {
 
 	didQuota, didRateLimit, didACL, didComplexity := make(map[string]bool), make(map[string]bool), make(map[string]bool), make(map[string]bool)
 	policyIDs := session.PolicyIDs()
-	customPolicies := false 
-	
-	if polJSON, found := session.Metadata["policies"]; found {
-		policies := []user.Policy{}
-		err := json.Unmarshal(policies, polJSON)
+	useCustomPolicies := false
+	var customPolicies []user.Policy
+
+	if polJSON, found := session.MetaData["policies"].(string); found {
+		err := json.Unmarshal([]byte(polJSON), &customPolicies)
+
 		if err != nil {
 			log.Error("Failed unmarshal policies", err)
 		} else {
-			cusomPolicies = true
+			useCustomPolicies = true
 			policyIDs = []string{}
-			for _, pol := range policies {
-				policyIDs = append(policyIDs, pol.ID)
+			for pi, _ := range customPolicies {
+				policyIDs = append(policyIDs, fmt.Sprintf("%d", pi))
 			}
 		}
 	}
 
 	for _, polID := range policyIDs {
 		var policy user.Policy
-		
-		if customPolicies {
-			for _, pol := range policies {
-				if pol.ID == polID {
-					policy = pol
-					break
-				}
-			}
-		} else 
+
+		if useCustomPolicies {
+			polIdx, _ := strconv.ParseInt(polID, 10, 64)
+			policy = customPolicies[polIdx]
+		} else {
 			t.Gw.policiesMu.RLock()
-			policy, ok := t.Gw.policiesByID[polID]
+			var ok bool
+			policy, ok = t.Gw.policiesByID[polID]
 			t.Gw.policiesMu.RUnlock()
+
+			if !ok {
+				err := fmt.Errorf("policy not found: %q", polID)
+				t.Logger().Error(err)
+				return err
+			}
 		}
-		
-		if !ok {
-			err := fmt.Errorf("policy not found: %q", polID)
-			t.Logger().Error(err)
-			return err
-		}
+
 		// Check ownership, policy org owner must be the same as API,
 		// otherwise you could overwrite a session key with a policy from a different org!
 		if t.Spec != nil && policy.OrgID != t.Spec.OrgID {
@@ -609,7 +609,7 @@ func (t BaseMiddleware) ApplyPolicies(session *user.SessionState) error {
 		session.Tags = appendIfMissing(session.Tags, tag)
 	}
 
-	if len(policies) == 0 {
+	if len(policyIDs) == 0 {
 		for apiID, accessRight := range session.AccessRights {
 			// check if the api in the session has per api limit
 			if !accessRight.Limit.IsEmpty() {

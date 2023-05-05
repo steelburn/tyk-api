@@ -56,11 +56,12 @@ func (*dummySessionManager) UpdateSession(key string, sess *user.SessionState, t
 }
 
 type testApplyPoliciesData struct {
-	name      string
-	policies  []string
-	errMatch  string                               // substring
-	sessMatch func(*testing.T, *user.SessionState) // ignored if nil
-	session   *user.SessionState
+	name               string
+	policies           []string
+	errMatch           string                               // substring
+	sessMatch          func(*testing.T, *user.SessionState) // ignored if nil
+	session            *user.SessionState
+	skipCustomPolicies bool
 }
 
 func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesData) {
@@ -397,19 +398,19 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 	tests := []testApplyPoliciesData{
 		{
 			"Empty", nil,
-			"", nil, nil,
+			"", nil, nil, false,
 		},
 		{
 			"Single", []string{"nonpart1"},
-			"", nil, nil,
+			"", nil, nil, false,
 		},
 		{
 			"Missing", []string{"nonexistent"},
-			"not found", nil, nil,
+			"not found", nil, nil, true,
 		},
 		{
 			"DiffOrg", []string{"difforg"},
-			"different org", nil, nil,
+			"different org", nil, nil, false,
 		},
 		{
 			name:     "MultiNonPart",
@@ -447,7 +448,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 		},
 		{
 			"NonpartAndPart", []string{"nonpart1", "quota1"},
-			"", nil, nil,
+			"", nil, nil, false,
 		},
 		{
 			"TagMerge", []string{"tags1", "tags2"},
@@ -458,7 +459,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				assert.Equal(t, want, s.Tags)
 			}, &user.SessionState{
 				Tags: []string{"key-tag"},
-			},
+			}, false,
 		},
 		{
 			"InactiveMergeOne", []string{"tags1", "inactive1"},
@@ -466,7 +467,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if !s.IsInactive {
 					t.Fatalf("want IsInactive to be true")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"InactiveMergeAll", []string{"inactive1", "inactive2"},
@@ -474,7 +475,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if !s.IsInactive {
 					t.Fatalf("want IsInactive to be true")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"InactiveWithSession", []string{"tags1", "tags2"},
@@ -484,7 +485,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				}
 			}, &user.SessionState{
 				IsInactive: true,
-			},
+			}, false,
 		},
 		{
 			"QuotaPart with unlimited", []string{"unlimited-quota"},
@@ -492,7 +493,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.QuotaMax != -1 {
 					t.Fatalf("want unlimited quota to be -1")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"QuotaPart", []string{"quota1"},
@@ -500,7 +501,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.QuotaMax != 2 {
 					t.Fatalf("want QuotaMax to be 2")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"QuotaParts", []string{"quota1", "quota2"},
@@ -508,7 +509,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.QuotaMax != 3 {
 					t.Fatalf("Should pick bigger value")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"QuotaPart with access rights", []string{"quota3"},
@@ -516,7 +517,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.QuotaMax != 3 {
 					t.Fatalf("quota should be the same as policy quota")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"QuotaPart with access rights in multi-policy", []string{"quota4", "nonpart1"},
@@ -528,7 +529,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				// Don't apply api 'b' coming from quota4 policy
 				want := map[string]user.AccessDefinition{"a": {Limit: user.APILimit{}}}
 				assert.Equal(t, want, s.AccessRights)
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"RatePart with unlimited", []string{"unlimited-rate"},
@@ -536,7 +537,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.Rate != -1 {
 					t.Fatalf("want unlimited rate to be -1")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"RatePart", []string{"rate1"},
@@ -544,7 +545,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.Rate != 3 {
 					t.Fatalf("want Rate to be 3")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"RateParts", []string{"rate1", "rate2"},
@@ -552,7 +553,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.Rate != 4 {
 					t.Fatalf("Should pick bigger value")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"ComplexityPart with unlimited", []string{"unlimitedComplexity"},
@@ -560,7 +561,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.MaxQueryDepth != -1 {
 					t.Fatalf("unlimitied query depth should be -1")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"ComplexityPart", []string{"complexity1"},
@@ -568,7 +569,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.MaxQueryDepth != 2 {
 					t.Fatalf("want MaxQueryDepth to be 2")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"ComplexityParts", []string{"complexity1", "complexity2"},
@@ -576,7 +577,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.MaxQueryDepth != 3 {
 					t.Fatalf("Should pick bigger value")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"AclPart", []string{"acl1"},
@@ -584,21 +585,21 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				want := map[string]user.AccessDefinition{"a": {Limit: user.APILimit{}}}
 
 				assert.Equal(t, want, s.AccessRights)
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"AclPart", []string{"acl1", "acl2"},
 			"", func(t *testing.T, s *user.SessionState) {
 				want := map[string]user.AccessDefinition{"a": {Limit: user.APILimit{}}, "b": {Limit: user.APILimit{}}}
 				assert.Equal(t, want, s.AccessRights)
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"Acl for a and rate for a,b", []string{"acl1", "rate-for-a-b"},
 			"", func(t *testing.T, s *user.SessionState) {
 				want := map[string]user.AccessDefinition{"a": {Limit: user.APILimit{Rate: 4}}}
 				assert.Equal(t, want, s.AccessRights)
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"Acl for a,b and individual rate for a,b", []string{"acl-for-a-b", "rate-for-a", "rate-for-b"},
@@ -608,7 +609,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 					"b": {Limit: user.APILimit{Rate: 2}},
 				}
 				assert.Equal(t, want, s.AccessRights)
-			}, nil,
+			}, nil, false,
 		},
 		{
 			"RightsUpdate", []string{"acl3"},
@@ -625,7 +626,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 					t.Fatalf("couldn't apply policy: %s", err.Error())
 				}
 				assert.Equal(t, newPolicy.AccessRights, ses.AccessRights)
-			}, nil,
+			}, nil, false,
 		},
 		{
 			name:     "Per API is set with other partitions to true",
@@ -802,7 +803,7 @@ func (s *Test) TestPrepareApplyPolicies() (*BaseMiddleware, []testApplyPoliciesD
 				if s.ThrottleInterval != 9 {
 					t.Fatalf("Throttle interval should be 9 inherited from policy")
 				}
-			}, nil,
+			}, nil, false,
 		},
 		{
 			name:     "Throttle retry limit from policy",
@@ -856,13 +857,46 @@ func TestApplyPolicies(t *testing.T) {
 
 	bmid, tests := ts.TestPrepareApplyPolicies()
 
+	t.Run("With policy_ids field", func(t *testing.T) {
+		testApplyPolicies(tests, t, ts, bmid, false)
+	})
+	t.Run("With metadata field", func(t *testing.T) {
+		testApplyPolicies(tests, t, ts, bmid, true)
+	})
+}
+
+func testApplyPolicies(tests []testApplyPoliciesData, t *testing.T, ts *Test, bmid *BaseMiddleware, useMetadata bool) {
 	for _, tc := range tests {
+		if tc.skipCustomPolicies && useMetadata {
+			continue
+		}
+
 		t.Run(tc.name, func(t *testing.T) {
 			sess := tc.session
 			if sess == nil {
 				sess = &user.SessionState{}
 			}
-			sess.SetPolicies(tc.policies...)
+
+			if useMetadata {
+				pols := []user.Policy{}
+				for _, p := range tc.policies {
+					pols = append(pols, ts.Gw.policiesByID[p])
+				}
+
+				// serialize policies to json and put them to metadata
+				policies, err := json.Marshal(pols)
+				if err != nil {
+					t.Fatalf("failed to marshal policies: %v", err)
+				}
+
+				sess.ApplyPolicyID = ""
+				sess.MetaData = map[string]interface{}{
+					"policies": string(policies),
+				}
+			} else {
+				sess.SetPolicies(tc.policies...)
+			}
+
 			errStr := ""
 			if err := bmid.ApplyPolicies(sess); err != nil {
 				errStr = err.Error()
@@ -870,8 +904,7 @@ func TestApplyPolicies(t *testing.T) {
 			if tc.errMatch == "" && errStr != "" {
 				t.Fatalf("didn't want err but got %s", errStr)
 			} else if !strings.Contains(errStr, tc.errMatch) {
-				t.Fatalf("error %q doesn't match %q",
-					errStr, tc.errMatch)
+				t.Fatalf("error %q doesn't match %q", errStr, tc.errMatch)
 			}
 			if tc.sessMatch != nil {
 				tc.sessMatch(t, sess)
