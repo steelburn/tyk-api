@@ -316,6 +316,40 @@ func (t BaseMiddleware) ApplyPolicies(session *user.SessionState) error {
 	for _, polID := range policies {
 		t.Gw.policiesMu.RLock()
 		policy, ok := t.Gw.policiesByID[polID]
+		if !ok {
+			err := fmt.Errorf("policy not found: %q", polID)
+			t.Logger().Error(err)
+			return err
+		}
+
+		t.Gw.policiesMu.RUnlock()
+
+		//all := !(policy.Partitions.Quota || policy.Partitions.RateLimit || policy.Partitions.Acl || policy.Partitions.Complexity)
+
+		if policy.Partitions.Quota {
+			session.QuotaMax = 0
+			session.QuotaRemaining = 0
+		}
+
+		if policy.Partitions.RateLimit {
+			session.Rate = 0
+			session.Per = 0
+			session.ThrottleRetryLimit = 0
+			session.ThrottleInterval = 0
+		}
+
+		if policy.Partitions.Complexity {
+			session.MaxQueryDepth = 0
+		}
+
+		if policy.Partitions.Acl {
+			session.AccessRights = map[string]user.AccessDefinition{}
+		}
+	}
+
+	for _, polID := range policies {
+		t.Gw.policiesMu.RLock()
+		policy, ok := t.Gw.policiesByID[polID]
 		t.Gw.policiesMu.RUnlock()
 		if !ok {
 			err := fmt.Errorf("policy not found: %q", polID)
